@@ -1,0 +1,43 @@
+name: 'Fast Review'
+description: 'AI code review in under 60 seconds. Security, logic, a11y — no fluff.'
+author: 'Tunajam'
+
+branding:
+  icon: 'zap'
+  color: 'yellow'
+
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude'
+    required: true
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-20250514'
+  focus:
+    description: 'Comma-separated focus areas (security,logic,a11y,react)'
+    required: false
+    default: 'security,logic,a11y'
+  max-files:
+    description: 'Maximum files to review (0 = no limit)'
+    required: false
+    default: '20'
+  ignore-patterns:
+    description: 'Glob patterns to ignore (comma-separated)'
+    required: false
+    default: '*.lock,*.min.js,*.min.css,dist/**,build/**,node_modules/**'
+
+outputs:
+  issues-found:
+    description: 'Number of issues found'
+    value: ${{ steps.review.outputs.issues-found }}
+  review-time:
+    description: 'Time taken for review in seconds'
+    value: ${{ steps.review.outputs.review-time }}
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
