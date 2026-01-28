@@ -54,6 +54,13 @@ const REVIEW_PROMPT = `You are a senior engineer doing a fast, focused code revi
 
 Review this diff now. Be fast, be accurate, don't waste the developer's time.`;
 
+// Common libraries we can fetch docs for via Context7
+const KNOWN_LIBRARIES = [
+  "react", "next", "convex", "tailwindcss", "zod", "prisma",
+  "tanstack/react-query", "zustand", "jotai", "clerk", "stripe",
+  "playwright", "vitest", "typescript", "drizzle-orm"
+];
+
 const FOCUS_AREA_DESCRIPTIONS: Record<string, string> = {
   security: `- Security: SQL injection, XSS, SSRF, auth bypasses, exposed secrets, insecure crypto
   - Check: user input handling, URL validation, authentication/authorization gaps`,
@@ -67,6 +74,78 @@ const FOCUS_AREA_DESCRIPTIONS: Record<string, string> = {
   react: `- React: hooks rules violations, missing deps in useEffect, missing keys in lists
   - Check: stale closures, unnecessary re-renders, improper state updates`,
 };
+
+/**
+ * Extract library imports from a diff
+ */
+function extractImports(diff: string): string[] {
+  const imports = new Set<string>();
+  
+  // Match import statements
+  const importRegex = /(?:import|from|require)\s*\(?['"]([^'"]+)['"]\)?/g;
+  let match;
+  
+  while ((match = importRegex.exec(diff)) !== null) {
+    const pkg = match[1];
+    // Get the package name (handle scoped packages and subpaths)
+    const pkgName = pkg.startsWith("@") 
+      ? pkg.split("/").slice(0, 2).join("/")
+      : pkg.split("/")[0];
+    
+    // Only include known libraries
+    if (KNOWN_LIBRARIES.some(lib => pkgName === lib || pkgName.includes(lib))) {
+      imports.add(pkgName);
+    }
+  }
+  
+  return Array.from(imports);
+}
+
+/**
+ * Fetch library documentation via Context7 CLI or API
+ */
+async function fetchContext7Docs(
+  libraries: string[],
+  apiKey?: string
+): Promise<string> {
+  if (libraries.length === 0) return "";
+  
+  const docs: string[] = [];
+  
+  for (const lib of libraries.slice(0, 3)) { // Limit to 3 libraries
+    try {
+      if (apiKey) {
+        // Use Context7 API
+        const response = await fetch(`https://api.context7.io/v1/docs/${encodeURIComponent(lib)}`, {
+          headers: { "Authorization": `Bearer ${apiKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json() as { summary?: string };
+          if (data.summary) {
+            docs.push(`### ${lib}\n${data.summary}`);
+          }
+        }
+      } else {
+        // Try ctx7 CLI (must be in PATH)
+        const { execSync } = await import("child_process");
+        const output = execSync(`ctx7 docs ${lib} --summary`, { 
+          encoding: "utf-8",
+          timeout: 5000 
+        });
+        if (output.trim()) {
+          docs.push(`### ${lib}\n${output.trim()}`);
+        }
+      }
+    } catch {
+      // Skip if ctx7 not available or fails
+      continue;
+    }
+  }
+  
+  return docs.length > 0 
+    ? `\n## Library Context (via Context7)\n${docs.join("\n\n")}\n`
+    : "";
+}
 
 async function callOpenRouter(
   apiKey: string,
@@ -117,6 +196,8 @@ async function run(): Promise<void> {
     const focusAreas = (core.getInput("focus") || "security,logic,a11y").split(",").map(s => s.trim());
     const maxFiles = parseInt(core.getInput("max-files") || "20", 10);
     const ignorePatterns = (core.getInput("ignore-patterns") || "").split(",").map(s => s.trim()).filter(Boolean);
+    const useContext7 = core.getInput("context7") === "true";
+    const context7ApiKey = core.getInput("context7-api-key") || undefined;
     
     // Get context
     const context = github.context;
@@ -155,9 +236,19 @@ async function run(): Promise<void> {
       .map(area => FOCUS_AREA_DESCRIPTIONS[area])
       .join("\n");
     
+    // Fetch Context7 docs if enabled
+    let libraryContext = "";
+    if (useContext7) {
+      const detectedLibs = extractImports(filteredDiff);
+      if (detectedLibs.length > 0) {
+        core.info(`📚 Fetching docs for: ${detectedLibs.join(", ")}`);
+        libraryContext = await fetchContext7Docs(detectedLibs, context7ApiKey);
+      }
+    }
+    
     // Build prompt
     const prompt = REVIEW_PROMPT
-      .replace("{focus_areas}", focusDescription)
+      .replace("{focus_areas}", focusDescription + libraryContext)
       .replace("{diff}", filteredDiff.slice(0, 100000)); // Limit diff size
     
     core.info("🤖 Running AI analysis...");

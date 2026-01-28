@@ -29,6 +29,13 @@ inputs:
     description: 'Glob patterns to ignore (comma-separated)'
     required: false
     default: '*.lock,*.min.js,*.min.css,dist/**,build/**,node_modules/**'
+  context7:
+    description: 'Enable Context7 for latest library docs (requires ctx7 CLI or API)'
+    required: false
+    default: 'false'
+  context7-api-key:
+    description: 'Context7 API key (if using API instead of CLI)'
+    required: false
 
 outputs:
   issues-found:
