@@ -11,6 +11,8 @@ interface ReviewComment {
 interface ReviewResult {
   comments: ReviewComment[];
   summary: string;
+  flowDiagram: string;
+  uxAnalysis: string;
 }
 
 const REVIEW_PROMPT = `You are a senior engineer doing a fast, focused code review.
@@ -27,7 +29,9 @@ const REVIEW_PROMPT = `You are a senior engineer doing a fast, focused code revi
 
 ## Output Format (JSON only, no markdown)
 {
-  "summary": "One sentence overall assessment or 'LGTM' if no issues",
+  "summary": "One sentence overall assessment",
+  "flowDiagram": "Mermaid diagram showing the flow of changes (use graph TD or sequenceDiagram). Show how data/control flows through the new or modified code. Keep it focused on what THIS PR changes.",
+  "uxAnalysis": "2-3 sentences analyzing how these changes impact user experience. Does it make things simpler? Faster? More intuitive? Any UX concerns?",
   "comments": [
     {
       "path": "src/file.ts",
@@ -172,8 +176,16 @@ async function run(): Promise<void> {
       result = JSON.parse(jsonStr.trim());
     } catch (e) {
       core.warning(`Failed to parse AI response: ${responseText}`);
-      result = { summary: "Review completed but response parsing failed", comments: [] };
+      result = { 
+        summary: "Review completed but response parsing failed", 
+        comments: [],
+        flowDiagram: "",
+        uxAnalysis: ""
+      };
     }
+    
+    // Build review body with flow diagram and UX analysis
+    const reviewBody = buildReviewBody(result, countFiles(filteredDiff), startTime, model);
     
     // Post review
     if (result.comments.length > 0) {
@@ -188,7 +200,7 @@ async function run(): Promise<void> {
       await octokit.rest.pulls.createReview({
         ...context.repo,
         pull_number: prNumber,
-        body: `## ⚡ Fast Review\n\n${result.summary}\n\n_Reviewed ${countFiles(filteredDiff)} files in ${Math.round((Date.now() - startTime) / 1000)}s with ${model.split('/')[1] || model}_`,
+        body: reviewBody,
         event: result.comments.some(c => c.severity === "critical") ? "REQUEST_CHANGES" : "COMMENT",
         comments: reviewComments,
       });
@@ -198,7 +210,7 @@ async function run(): Promise<void> {
       await octokit.rest.pulls.createReview({
         ...context.repo,
         pull_number: prNumber,
-        body: `## ⚡ Fast Review\n\n${result.summary || "LGTM 👍"}\n\n_Reviewed ${countFiles(filteredDiff)} files in ${Math.round((Date.now() - startTime) / 1000)}s with ${model.split('/')[1] || model}_`,
+        body: reviewBody,
         event: "APPROVE",
       });
     }
@@ -263,6 +275,36 @@ function formatComment(comment: ReviewComment): string {
   const emoji = comment.severity === "critical" ? "🚨" : 
                 comment.severity === "warning" ? "⚠️" : "💡";
   return `${emoji} ${comment.body}`;
+}
+
+function buildReviewBody(
+  result: ReviewResult, 
+  fileCount: number, 
+  startTime: number, 
+  model: string
+): string {
+  const reviewTime = Math.round((Date.now() - startTime) / 1000);
+  const modelName = model.split('/')[1] || model;
+  
+  let body = `## ⚡ Fast Review\n\n`;
+  body += `${result.summary || "LGTM 👍"}\n\n`;
+  
+  // Add flow diagram if present
+  if (result.flowDiagram && result.flowDiagram.trim()) {
+    body += `### 📊 Change Flow\n\n`;
+    body += `\`\`\`mermaid\n${result.flowDiagram.trim()}\n\`\`\`\n\n`;
+  }
+  
+  // Add UX analysis if present
+  if (result.uxAnalysis && result.uxAnalysis.trim()) {
+    body += `### 🎯 UX Impact\n\n`;
+    body += `${result.uxAnalysis.trim()}\n\n`;
+  }
+  
+  // Add footer
+  body += `---\n_Reviewed ${fileCount} files in ${reviewTime}s with ${modelName}_`;
+  
+  return body;
 }
 
 run();
