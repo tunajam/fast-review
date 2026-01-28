@@ -102,6 +102,41 @@ function extractImports(diff: string): string[] {
 }
 
 /**
+ * Ensure ctx7 CLI is installed
+ */
+async function ensureCtx7Installed(): Promise<boolean> {
+  const { execSync } = await import("child_process");
+  
+  // Check if already installed
+  try {
+    execSync("which ctx7", { encoding: "utf-8", stdio: "pipe" });
+    return true;
+  } catch {
+    // Not installed, try to install
+  }
+  
+  core.info("📦 Installing ctx7 CLI...");
+  
+  try {
+    // Check if Go is available
+    execSync("which go", { encoding: "utf-8", stdio: "pipe" });
+    
+    // Install ctx7
+    execSync("go install github.com/tunajam/ctx7@latest", {
+      encoding: "utf-8",
+      timeout: 30000,
+      env: { ...process.env, GOBIN: "/usr/local/bin" }
+    });
+    
+    core.info("✅ ctx7 installed");
+    return true;
+  } catch (e) {
+    core.warning("⚠️ Could not install ctx7 (Go not available or install failed)");
+    return false;
+  }
+}
+
+/**
  * Fetch library documentation via Context7 CLI or API
  */
 async function fetchContext7Docs(
@@ -110,7 +145,18 @@ async function fetchContext7Docs(
 ): Promise<string> {
   if (libraries.length === 0) return "";
   
+  const { execSync } = await import("child_process");
   const docs: string[] = [];
+  
+  // If no API key, ensure ctx7 CLI is installed
+  let ctx7Available = false;
+  if (!apiKey) {
+    ctx7Available = await ensureCtx7Installed();
+    if (!ctx7Available) {
+      core.warning("Context7 disabled: no API key and ctx7 CLI unavailable");
+      return "";
+    }
+  }
   
   for (const lib of libraries.slice(0, 3)) { // Limit to 3 libraries
     try {
@@ -126,13 +172,11 @@ async function fetchContext7Docs(
           }
         }
       } else {
-        // Try ctx7 CLI (must be in PATH)
-        // ctx7 outputs llms.txt content to stdout, logs to stderr
-        const { execSync } = await import("child_process");
+        // Use ctx7 CLI - outputs llms.txt content to stdout
         const output = execSync(`ctx7 ${lib}`, { 
           encoding: "utf-8",
           timeout: 10000,
-          stdio: ["pipe", "pipe", "pipe"] // Capture stdout, ignore stderr
+          stdio: ["pipe", "pipe", "pipe"]
         });
         if (output.trim()) {
           // Limit context size to avoid token bloat
@@ -141,7 +185,7 @@ async function fetchContext7Docs(
         }
       }
     } catch {
-      // Skip if ctx7 not available or fails
+      // Skip if library not found
       continue;
     }
   }
