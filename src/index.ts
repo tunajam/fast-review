@@ -127,13 +127,17 @@ async function fetchContext7Docs(
         }
       } else {
         // Try ctx7 CLI (must be in PATH)
+        // ctx7 outputs llms.txt content to stdout, logs to stderr
         const { execSync } = await import("child_process");
-        const output = execSync(`ctx7 docs ${lib} --summary`, { 
+        const output = execSync(`ctx7 ${lib}`, { 
           encoding: "utf-8",
-          timeout: 5000 
+          timeout: 10000,
+          stdio: ["pipe", "pipe", "pipe"] // Capture stdout, ignore stderr
         });
         if (output.trim()) {
-          docs.push(`### ${lib}\n${output.trim()}`);
+          // Limit context size to avoid token bloat
+          const trimmed = output.trim().slice(0, 3000);
+          docs.push(`### ${lib}\n${trimmed}`);
         }
       }
     } catch {
