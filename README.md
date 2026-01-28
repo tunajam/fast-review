@@ -42,6 +42,8 @@ jobs:
 | `focus` | Focus areas (comma-separated) | ❌ | `security,logic,a11y` |
 | `max-files` | Max files to review (0 = no limit) | ❌ | `20` |
 | `ignore-patterns` | Glob patterns to ignore | ❌ | `*.lock,*.min.js,...` |
+| `context7` | Enable Context7 for library docs | ❌ | `false` |
+| `context7-api-key` | Context7 API key (if using API) | ❌ | - |
 
 ## Focus Areas
 
@@ -79,6 +81,19 @@ jobs:
     model: google/gemini-2.0-flash-001
     focus: security,logic,a11y,react
 ```
+
+### With Context7 for latest library docs
+
+```yaml
+- uses: tunajam/fast-review@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    context7: true
+    context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}  # Optional if ctx7 CLI is in PATH
+```
+
+Context7 automatically detects libraries in your code (React, Next.js, Convex, etc.) and fetches the latest docs to catch deprecated APIs and incorrect usage patterns.
 
 ## License
 
