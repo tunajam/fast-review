@@ -10,13 +10,13 @@ inputs:
   github-token:
     description: 'GitHub token for API access'
     required: true
-  anthropic-api-key:
-    description: 'Anthropic API key for Claude'
+  openrouter-api-key:
+    description: 'OpenRouter API key'
     required: true
   model:
-    description: 'Claude model to use'
+    description: 'Model to use (any OpenRouter model)'
     required: false
-    default: 'claude-sonnet-4-20250514'
+    default: 'anthropic/claude-sonnet-4-20250514'
   focus:
     description: 'Comma-separated focus areas (security,logic,a11y,react)'
     required: false

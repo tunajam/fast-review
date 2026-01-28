@@ -29,7 +29,7 @@ jobs:
       - uses: tunajam/fast-review@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
 ## Inputs
@@ -37,8 +37,8 @@ jobs:
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `github-token` | GitHub token for API access | ✅ | - |
-| `anthropic-api-key` | Anthropic API key for Claude | ✅ | - |
-| `model` | Claude model to use | ❌ | `claude-sonnet-4-20250514` |
+| `openrouter-api-key` | OpenRouter API key | ✅ | - |
+| `model` | Any OpenRouter model | ❌ | `anthropic/claude-sonnet-4-20250514` |
 | `focus` | Focus areas (comma-separated) | ❌ | `security,logic,a11y` |
 | `max-files` | Max files to review (0 = no limit) | ❌ | `20` |
 | `ignore-patterns` | Glob patterns to ignore | ❌ | `*.lock,*.min.js,...` |
@@ -65,17 +65,18 @@ jobs:
 - uses: tunajam/fast-review@v1
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     focus: security
 ```
 
-### Full review for React projects
+### Full review with Gemini Flash (fast & cheap)
 
 ```yaml
 - uses: tunajam/fast-review@v1
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    model: google/gemini-2.0-flash-001
     focus: security,logic,a11y,react
 ```
 

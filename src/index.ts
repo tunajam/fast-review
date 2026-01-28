@@ -1,6 +1,5 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import Anthropic from "@anthropic-ai/sdk";
 
 interface ReviewComment {
   path: string;
@@ -65,14 +64,52 @@ const FOCUS_AREA_DESCRIPTIONS: Record<string, string> = {
   - Check: stale closures, unnecessary re-renders, improper state updates`,
 };
 
+async function callOpenRouter(
+  apiKey: string,
+  model: string,
+  prompt: string
+): Promise<string> {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://github.com/tunajam/fast-review",
+      "X-Title": "Fast Review",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 4096,
+      temperature: 0.3, // Lower temp for more consistent reviews
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error (${response.status}): ${error}`);
+  }
+
+  const data = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const content = data.choices?.[0]?.message?.content;
+  
+  if (!content) {
+    throw new Error("No response from OpenRouter");
+  }
+  
+  return content;
+}
+
 async function run(): Promise<void> {
   const startTime = Date.now();
   
   try {
     // Get inputs
     const githubToken = core.getInput("github-token", { required: true });
-    const anthropicApiKey = core.getInput("anthropic-api-key", { required: true });
-    const model = core.getInput("model") || "claude-sonnet-4-20250514";
+    const openrouterApiKey = core.getInput("openrouter-api-key", { required: true });
+    const model = core.getInput("model") || "anthropic/claude-sonnet-4-20250514";
     const focusAreas = (core.getInput("focus") || "security,logic,a11y").split(",").map(s => s.trim());
     const maxFiles = parseInt(core.getInput("max-files") || "20", 10);
     const ignorePatterns = (core.getInput("ignore-patterns") || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -87,7 +124,7 @@ async function run(): Promise<void> {
     const prNumber = context.payload.pull_request.number;
     const octokit = github.getOctokit(githubToken);
     
-    core.info(`🔍 Reviewing PR #${prNumber}...`);
+    core.info(`🔍 Reviewing PR #${prNumber} with ${model}...`);
     
     // Get the diff
     const { data: diff } = await octokit.rest.pulls.get({
@@ -114,38 +151,27 @@ async function run(): Promise<void> {
       .map(area => FOCUS_AREA_DESCRIPTIONS[area])
       .join("\n");
     
-    // Call Claude
-    const anthropic = new Anthropic({ apiKey: anthropicApiKey });
-    
+    // Build prompt
     const prompt = REVIEW_PROMPT
       .replace("{focus_areas}", focusDescription)
       .replace("{diff}", filteredDiff.slice(0, 100000)); // Limit diff size
     
     core.info("🤖 Running AI analysis...");
     
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const responseText = await callOpenRouter(openrouterApiKey, model, prompt);
     
     // Parse response
-    const content = response.content[0];
-    if (content.type !== "text") {
-      throw new Error("Unexpected response type from Claude");
-    }
-    
     let result: ReviewResult;
     try {
       // Handle potential markdown code fences
-      let jsonStr = content.text;
+      let jsonStr = responseText;
       const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (jsonMatch) {
         jsonStr = jsonMatch[1];
       }
       result = JSON.parse(jsonStr.trim());
     } catch (e) {
-      core.warning(`Failed to parse AI response: ${content.text}`);
+      core.warning(`Failed to parse AI response: ${responseText}`);
       result = { summary: "Review completed but response parsing failed", comments: [] };
     }
     
@@ -162,7 +188,7 @@ async function run(): Promise<void> {
       await octokit.rest.pulls.createReview({
         ...context.repo,
         pull_number: prNumber,
-        body: `## Fast Review\n\n${result.summary}\n\n_Reviewed in ${Math.round((Date.now() - startTime) / 1000)}s_`,
+        body: `## ⚡ Fast Review\n\n${result.summary}\n\n_Reviewed ${countFiles(filteredDiff)} files in ${Math.round((Date.now() - startTime) / 1000)}s with ${model.split('/')[1] || model}_`,
         event: result.comments.some(c => c.severity === "critical") ? "REQUEST_CHANGES" : "COMMENT",
         comments: reviewComments,
       });
@@ -172,7 +198,7 @@ async function run(): Promise<void> {
       await octokit.rest.pulls.createReview({
         ...context.repo,
         pull_number: prNumber,
-        body: `## Fast Review\n\n${result.summary || "LGTM 👍"}\n\n_Reviewed in ${Math.round((Date.now() - startTime) / 1000)}s_`,
+        body: `## ⚡ Fast Review\n\n${result.summary || "LGTM 👍"}\n\n_Reviewed ${countFiles(filteredDiff)} files in ${Math.round((Date.now() - startTime) / 1000)}s with ${model.split('/')[1] || model}_`,
         event: "APPROVE",
       });
     }
