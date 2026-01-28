@@ -109,7 +109,9 @@ async function ensureCtx7Installed(): Promise<boolean> {
   
   // Check if already installed
   try {
-    execSync("which ctx7", { encoding: "utf-8", stdio: "pipe" });
+    const ctx7Path = `${process.env.HOME}/go/bin/ctx7`;
+    execSync(`test -x ${ctx7Path}`, { encoding: "utf-8", stdio: "pipe" });
+    core.info("✅ ctx7 already installed");
     return true;
   } catch {
     // Not installed, try to install
@@ -121,12 +123,16 @@ async function ensureCtx7Installed(): Promise<boolean> {
     // Check if Go is available
     execSync("which go", { encoding: "utf-8", stdio: "pipe" });
     
-    // Install ctx7
-    execSync("go install github.com/tunajam/ctx7@latest", {
-      encoding: "utf-8",
-      timeout: 30000,
-      env: { ...process.env, GOBIN: "/usr/local/bin" }
-    });
+    // Install ctx7 (try tunajam fork first, fallback to original)
+    try {
+      execSync("go install github.com/hsbacot/ctx7@latest", {
+        encoding: "utf-8",
+        timeout: 60000,
+        env: { ...process.env, GOPATH: process.env.HOME + "/go", PATH: process.env.PATH + ":" + process.env.HOME + "/go/bin" }
+      });
+    } catch {
+      throw new Error("Failed to install ctx7");
+    }
     
     core.info("✅ ctx7 installed");
     return true;
@@ -173,7 +179,8 @@ async function fetchContext7Docs(
         }
       } else {
         // Use ctx7 CLI - outputs llms.txt content to stdout
-        const output = execSync(`ctx7 ${lib}`, { 
+        const ctx7Path = `${process.env.HOME}/go/bin/ctx7`;
+        const output = execSync(`${ctx7Path} ${lib}`, { 
           encoding: "utf-8",
           timeout: 10000,
           stdio: ["pipe", "pipe", "pipe"]
