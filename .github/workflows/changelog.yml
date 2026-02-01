@@ -1,0 +1,45 @@
+name: Changelog
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode'
+        required: true
+        default: 'entry'
+        type: choice
+        options: [entry, weekly]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  changelog-entry:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Generate changelog entry
+        uses: tunajam/shipped@v1
+        with:
+          mode: entry
+          api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          provider: openrouter
+          model: google/gemini-2.0-flash-001
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Commit changes
+        run: |
+          git config user.name "Shipped Bot"
+          git config user.email "shipped@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --staged --quiet || git commit -m "docs: changelog for #${{ github.event.pull_request.number }}"
+          git push
