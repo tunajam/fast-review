@@ -205,8 +205,16 @@ async function fetchContext7Docs(
 async function callOpenRouter(
   apiKey: string,
   model: string,
-  prompt: string
+  prompt: string,
+  systemPrompt?: string
 ): Promise<string> {
+  const messages: Array<{ role: string; content: string }> = [];
+  
+  if (systemPrompt) {
+    messages.push({ role: "system", content: systemPrompt });
+  }
+  messages.push({ role: "user", content: prompt });
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -217,7 +225,7 @@ async function callOpenRouter(
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: "user", content: prompt }],
+      messages,
       max_tokens: 4096,
       temperature: 0.3, // Lower temp for more consistent reviews
     }),
@@ -240,6 +248,57 @@ async function callOpenRouter(
   return content;
 }
 
+/**
+ * Extract valid line numbers from a diff for a given file path.
+ * Returns the set of line numbers that are part of added/modified hunks.
+ */
+function extractDiffLines(diff: string): Map<string, Set<number>> {
+  const fileLines = new Map<string, Set<number>>();
+  const files = diff.split(/(?=^diff --git)/m);
+  
+  for (const file of files) {
+    const pathMatch = file.match(/^diff --git a\/(.+?) b\/(.+)/m);
+    if (!pathMatch) continue;
+    
+    const filePath = pathMatch[2];
+    const lines = new Set<number>();
+    
+    // Parse hunk headers to find valid line ranges
+    const hunkRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+    let hunkMatch;
+    
+    while ((hunkMatch = hunkRegex.exec(file)) !== null) {
+      const startLine = parseInt(hunkMatch[1], 10);
+      const lineCount = parseInt(hunkMatch[2] || "1", 10);
+      for (let i = startLine; i < startLine + lineCount; i++) {
+        lines.add(i);
+      }
+    }
+    
+    fileLines.set(filePath, lines);
+  }
+  
+  return fileLines;
+}
+
+/**
+ * Fetch a skill/prompt from a URL (raw GitHub, packs.sh, etc.)
+ */
+async function fetchSkillContent(url: string): Promise<string> {
+  try {
+    const response = await fetch(url, { 
+      headers: { "Accept": "text/plain" },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return "";
+    const text = await response.text();
+    // Strip YAML frontmatter if present
+    return text.replace(/^---[\s\S]*?---\n*/m, "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function run(): Promise<void> {
   const startTime = Date.now();
   
@@ -253,6 +312,8 @@ async function run(): Promise<void> {
     const ignorePatterns = (core.getInput("ignore-patterns") || "").split(",").map(s => s.trim()).filter(Boolean);
     const useContext7 = core.getInput("context7") === "true";
     const context7ApiKey = core.getInput("context7-api-key") || undefined;
+    const skillUrls = (core.getInput("skills") || "").split(",").map(s => s.trim()).filter(Boolean);
+    const customSystemPrompt = core.getInput("system-prompt") || "";
     
     // Get context
     const context = github.context;
@@ -301,6 +362,31 @@ async function run(): Promise<void> {
       }
     }
     
+    // Fetch skills if provided
+    let skillContext = "";
+    if (skillUrls.length > 0) {
+      core.info(`📖 Loading ${skillUrls.length} skill(s)...`);
+      const skillContents = await Promise.all(skillUrls.map(fetchSkillContent));
+      const loaded = skillContents.filter(Boolean);
+      if (loaded.length > 0) {
+        skillContext = loaded.join("\n\n---\n\n");
+        core.info(`✅ Loaded ${loaded.length} skill(s)`);
+      }
+    }
+
+    // Build system prompt from skills + custom prompt
+    let systemPrompt: string | undefined;
+    const systemParts: string[] = [];
+    if (skillContext) {
+      systemParts.push("## Additional Review Context (from skills)\n\n" + skillContext);
+    }
+    if (customSystemPrompt) {
+      systemParts.push(customSystemPrompt);
+    }
+    if (systemParts.length > 0) {
+      systemPrompt = systemParts.join("\n\n---\n\n");
+    }
+
     // Build prompt
     const prompt = REVIEW_PROMPT
       .replace("{focus_areas}", focusDescription + libraryContext)
@@ -308,7 +394,7 @@ async function run(): Promise<void> {
     
     core.info("🤖 Running AI analysis...");
     
-    const responseText = await callOpenRouter(openrouterApiKey, model, prompt);
+    const responseText = await callOpenRouter(openrouterApiKey, model, prompt, systemPrompt);
     
     // Parse response
     let result: ReviewResult;
@@ -337,19 +423,59 @@ async function run(): Promise<void> {
     if (result.comments.length > 0) {
       core.info(`📝 Found ${result.comments.length} issues, posting review...`);
       
-      const reviewComments = result.comments.map(c => ({
-        path: c.path,
-        line: c.line,
-        body: formatComment(c),
-      }));
+      // Validate line numbers against actual diff
+      const diffLines = extractDiffLines(filteredDiff);
+      const validComments: Array<{ path: string; line: number; body: string }> = [];
+      const invalidComments: ReviewComment[] = [];
       
-      await octokit.rest.pulls.createReview({
-        ...context.repo,
-        pull_number: prNumber,
-        body: reviewBody,
-        event: result.comments.some(c => c.severity === "critical") ? "REQUEST_CHANGES" : "COMMENT",
-        comments: reviewComments,
-      });
+      for (const c of result.comments) {
+        const fileLines = diffLines.get(c.path);
+        if (fileLines && fileLines.has(c.line)) {
+          validComments.push({ path: c.path, line: c.line, body: formatComment(c) });
+        } else {
+          invalidComments.push(c);
+          core.warning(`⚠️ Skipping comment on ${c.path}:${c.line} — line not in diff`);
+        }
+      }
+      
+      // If some comments had invalid lines, include them in the review body instead
+      let bodyWithFallback = reviewBody;
+      if (invalidComments.length > 0) {
+        bodyWithFallback += `\n\n### 📋 Additional Comments\n\n`;
+        bodyWithFallback += `_These comments reference lines not in the diff, listed here instead:_\n\n`;
+        for (const c of invalidComments) {
+          const emoji = c.severity === "critical" ? "🚨" : c.severity === "warning" ? "⚠️" : "💡";
+          bodyWithFallback += `- ${emoji} **\`${c.path}:${c.line}\`** — ${c.body}\n`;
+        }
+      }
+      
+      const reviewEvent = result.comments.some(c => c.severity === "critical") ? "REQUEST_CHANGES" : "COMMENT";
+
+      try {
+        await octokit.rest.pulls.createReview({
+          ...context.repo,
+          pull_number: prNumber,
+          body: bodyWithFallback,
+          event: reviewEvent,
+          comments: validComments.length > 0 ? validComments : undefined,
+        });
+      } catch (lineError) {
+        // If inline comments still fail, fall back to summary-only review
+        core.warning(`⚠️ Inline comments failed, posting as summary: ${lineError}`);
+        
+        let summaryBody = reviewBody + `\n\n### 📋 Review Comments\n\n`;
+        for (const c of result.comments) {
+          const emoji = c.severity === "critical" ? "🚨" : c.severity === "warning" ? "⚠️" : "💡";
+          summaryBody += `- ${emoji} **\`${c.path}:${c.line}\`** — ${c.body}\n`;
+        }
+        
+        await octokit.rest.pulls.createReview({
+          ...context.repo,
+          pull_number: prNumber,
+          body: summaryBody,
+          event: reviewEvent,
+        });
+      }
     } else {
       core.info("✅ No issues found");
       

@@ -36,6 +36,14 @@ inputs:
   context7-api-key:
     description: 'Context7 API key (if using API instead of CLI)'
     required: false
+  skills:
+    description: 'Comma-separated URLs to skill files (raw GitHub URLs, packs.sh, etc.) loaded as system prompt context'
+    required: false
+    default: ''
+  system-prompt:
+    description: 'Custom system prompt text appended to the review context'
+    required: false
+    default: ''
 
 outputs:
   issues-found:
