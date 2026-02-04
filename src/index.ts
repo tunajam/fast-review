@@ -492,6 +492,23 @@ async function run(): Promise<void> {
     core.setOutput("issues-found", result.comments.length);
     core.setOutput("review-time", reviewTime);
     
+    // Track in PostHog
+    const posthogApiKey = core.getInput("posthog-api-key") || "";
+    if (posthogApiKey) {
+      await trackReview(posthogApiKey, {
+        repo: `${context.repo.owner}/${context.repo.repo}`,
+        prNumber,
+        filesReviewed: countFiles(filteredDiff),
+        issuesFound: result.comments.length,
+        criticalIssues: result.comments.filter(c => c.severity === "critical").length,
+        warningIssues: result.comments.filter(c => c.severity === "warning").length,
+        reviewTimeSeconds: reviewTime,
+        model,
+        event: result.comments.some(c => c.severity === "critical") ? "request_changes" : result.comments.length > 0 ? "comment" : "approve",
+        focusAreas: focusAreas.join(","),
+      });
+    }
+    
     core.info(`⚡ Review complete in ${reviewTime}s`);
     
   } catch (error) {
@@ -500,6 +517,27 @@ async function run(): Promise<void> {
     } else {
       core.setFailed("An unexpected error occurred");
     }
+  }
+}
+
+async function trackReview(apiKey: string, props: Record<string, string | number>): Promise<void> {
+  try {
+    await fetch("https://us.i.posthog.com/capture/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        event: "review_completed",
+        distinct_id: props.repo,
+        properties: {
+          ...props,
+          $lib: "fast-review",
+        },
+      }),
+    });
+    core.info("📊 Tracked in PostHog");
+  } catch (e) {
+    core.warning(`PostHog tracking failed: ${e}`);
   }
 }
 

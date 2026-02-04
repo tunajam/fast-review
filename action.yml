@@ -44,6 +44,10 @@ inputs:
     description: 'Custom system prompt text appended to the review context'
     required: false
     default: ''
+  posthog-api-key:
+    description: 'PostHog project API key for tracking review analytics'
+    required: false
+    default: ''
 
 outputs:
   issues-found:
