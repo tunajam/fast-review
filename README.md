@@ -1,5 +1,9 @@
 # ⚡ Fast Review
 
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Fast%20Review-yellow?logo=github)](https://github.com/marketplace/actions/fast-review)
+[![GitHub release](https://img.shields.io/github/v/release/tunajam/fast-review)](https://github.com/tunajam/fast-review/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 AI code review in under 60 seconds. Security, logic, a11y — no fluff.
 
 ## Why?
@@ -44,6 +48,9 @@ jobs:
 | `ignore-patterns` | Glob patterns to ignore | ❌ | `*.lock,*.min.js,...` |
 | `context7` | Enable Context7 for library docs | ❌ | `false` |
 | `context7-api-key` | Context7 API key (if using API) | ❌ | - |
+| `skills` | URLs to skill files loaded as review context | ❌ | - |
+| `system-prompt` | Custom text appended to the review prompt | ❌ | - |
+| `posthog-api-key` | PostHog key for review analytics | ❌ | - |
 
 ## Focus Areas
 
