@@ -24,6 +24,9 @@ inputs:
   max-files:
     description: 'Maximum files to review (0 = no limit)'
     required: false
+  max-diff-chars:
+    description: 'Maximum diff characters to send to the model (default 30000, keeps under free tier token limits)'
+    required: false
     default: '20'
   ignore-patterns:
     description: 'Glob patterns to ignore (comma-separated)'

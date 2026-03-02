@@ -309,6 +309,7 @@ async function run(): Promise<void> {
     const model = core.getInput("model") || "anthropic/claude-sonnet-4-20250514";
     const focusAreas = (core.getInput("focus") || "security,logic,a11y").split(",").map(s => s.trim());
     const maxFiles = parseInt(core.getInput("max-files") || "20", 10);
+    const maxDiffChars = parseInt(core.getInput("max-diff-chars") || "30000", 10);
     const ignorePatterns = (core.getInput("ignore-patterns") || "").split(",").map(s => s.trim()).filter(Boolean);
     const useContext7 = core.getInput("context7") === "true";
     const context7ApiKey = core.getInput("context7-api-key") || undefined;
@@ -335,7 +336,7 @@ async function run(): Promise<void> {
     });
     
     // Filter the diff
-    const filteredDiff = filterDiff(diff as unknown as string, ignorePatterns, maxFiles);
+    const filteredDiff = filterDiff(diff as unknown as string, ignorePatterns, maxFiles, maxDiffChars);
     
     if (!filteredDiff.trim()) {
       core.info("No reviewable files in this PR");
@@ -541,7 +542,7 @@ async function trackReview(apiKey: string, props: Record<string, string | number
   }
 }
 
-function filterDiff(diff: string, ignorePatterns: string[], maxFiles: number): string {
+function filterDiff(diff: string, ignorePatterns: string[], maxFiles: number, maxDiffChars: number = 30000): string {
   const files = diff.split(/(?=^diff --git)/m);
   
   const filtered = files.filter(file => {
@@ -563,7 +564,13 @@ function filterDiff(diff: string, ignorePatterns: string[], maxFiles: number): s
   // Apply max files limit
   const limited = maxFiles > 0 ? filtered.slice(0, maxFiles) : filtered;
   
-  return limited.join("");
+  // Truncate total diff to maxDiffChars to stay within token limits
+  let result = limited.join("");
+  if (result.length > maxDiffChars) {
+    result = result.slice(0, maxDiffChars) + "\n\n... (diff truncated to fit token limits)";
+  }
+  
+  return result;
 }
 
 function matchGlob(path: string, pattern: string): boolean {
